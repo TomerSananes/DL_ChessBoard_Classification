@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as T
-from ChessDataset import ChessDataset
+import ChessDataset
 from Model import ChessModel
 from tqdm import tqdm
+import PrePostProcessing as ppp
 
 
 def get_mean_std (train_dataset):
@@ -36,27 +37,51 @@ def calculate_accuracy(outputs, labels):
     return (correct / total).item()
 
 
+def get_weights():
+    counts = ppp.fast_check_distribution("./data/train")
+    # Calculate inverse weights to handle data imbalance
+    counts_list = [counts[i] for i in range(13)]
+    counts_tensor = torch.tensor(counts_list, dtype=torch.float)
+    weights = 1.0 / counts_tensor
+
+    # Normalize weights so they sum up to the number of classes
+    weights = weights / weights.sum() * 13
+
+    for i, w in enumerate(weights):
+        print(f"Class {i}: {w:.4f}")
+
+    return weights
+
+
 def train_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Initial data loading without normalization
+    # Set Seed for Reproducibility
+    seed = 42
+    generator = torch.Generator().manual_seed(seed)
+
     base_transform = T.Compose([
         T.Resize((256, 256)),
         T.ToTensor()
     ])
-    full_dataset = ChessDataset(root_dir='./data/train', transform=base_transform)
+
+    # load raw data
+    raw_data = ChessDataset.upload_data_from_pc(root_dir='./data/train')
 
     # Split dataset into 70% Train, 15% Validation, 15% Test
-    train_size = int(0.7 * len(full_dataset))
-    val_size = int(0.15 * len(full_dataset))
-    test_size = len(full_dataset) - train_size - val_size
-    train_indices, val_indices, test_indices = random_split(full_dataset, [train_size, val_size, test_size])
+    train_size = int(0.7 * len(raw_data))
+    val_size = int(0.15 * len(raw_data))
+    test_size = len(raw_data) - train_size - val_size
+    train_list, val_list, test_list = random_split(raw_data, [train_size, val_size, test_size], generator=generator)
 
-    # Compute normalization stats based only on the Train set to avoid data leakage
-    train_subset = torch.utils.data.Subset(full_dataset, train_indices.indices)
-    mean, std = get_mean_std(train_subset)
-    print(f"Computed Stats - Mean: {mean}, Std: {std}")
+    train_dataset = ChessDataset.ChessDataset(list(train_list), transform=base_transform, is_train=True)
+    val_dataset = ChessDataset.ChessDataset(list(val_list), transform=base_transform, is_train=False)
+    test_dataset = ChessDataset.ChessDataset(list(test_list), transform=base_transform, is_train=False)
+
+
+    # Compute normalization stats based only on the train set to avoid data leakage
+    mean, std = get_mean_std(train_dataset)
 
     # Define final transformation including normalization
     final_transform = T.Compose([
@@ -65,23 +90,37 @@ def train_model():
         T.Normalize(mean=mean, std=std)
     ])
 
-    # Apply the final transformation to the entire dataset
-    full_dataset.transform = final_transform
+    # Define train final transformation including normalization
+    final_train_transform = T.Compose([
+        T.Resize((256, 256)),
+        T.ColorJitter(
+            brightness=0.3,
+            contrast=0.3,
+            saturation=0.2,
+            hue=0.1
+        ),
+        T.ToTensor(),
+        T.Normalize(mean=mean, std=std)
+    ])
 
-    # Create DataLoaders for each split
-    train_loader = DataLoader(torch.utils.data.Subset(full_dataset, train_indices.indices), batch_size=16, shuffle=True)
-    val_loader = DataLoader(torch.utils.data.Subset(full_dataset, val_indices.indices), batch_size=16, shuffle=False)
-    test_loader = DataLoader(torch.utils.data.Subset(full_dataset, test_indices.indices), batch_size=16, shuffle=False)
+    # Apply the final transformation to each dataset
+    train_dataset.transform = final_train_transform
+    val_dataset.transform = final_transform
+    test_dataset.transform = final_transform
+
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=4)
 
     # Initialize Model, Optimizer, and Loss Function
     model = ChessModel().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.00005)
+    criterion = nn.CrossEntropyLoss(weight=get_weights().to(device))
 
     # Training Loop
     all_train_loss = []
     all_val_loss = []
-    epochs = 50
+    epochs = 200
     for epoch in range(epochs):
         # Training Phase
         model.train()
@@ -130,7 +169,7 @@ def train_model():
     print(f"\nFINAL TEST ACCURACY: {test_acc / len(test_loader):.4f}")
 
     # Save the trained weights
-    torch.save(model.state_dict(), "chess_model_final.pth")
+    torch.save(model.state_dict(), "chess_model.pth")
 
 
 if __name__ == "__main__":

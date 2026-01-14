@@ -1,3 +1,6 @@
+import os
+import pandas as pd
+from collections import Counter
 import numpy as np
 import chess.svg
 import io
@@ -59,3 +62,29 @@ def create_fen_image(fen_str):
     svg_data = chess.svg.board(board=board, size=300)
     png_data = svg2png(bytestring=svg_data)
     return Image.open(io.BytesIO(png_data))
+
+
+def fast_check_distribution(root_dir):
+    all_labels = []
+    # Iterate through game directories
+    for game_dir in os.listdir(root_dir):
+        game_path = os.path.join(root_dir, game_dir)
+        if not os.path.isdir(game_path): continue
+
+        # Find CSV
+        csv_files = [f for f in os.listdir(game_path) if f.endswith('.csv')]
+        if not csv_files: continue
+        df = pd.read_csv(os.path.join(game_path, csv_files[0]))
+
+        # Count how many frames each FEN covers
+        for _, row in df.iterrows():
+            start_frame = int(row.iloc[0])
+            end_frame = int(row.iloc[1])
+            fen = row.iloc[2]
+            num_frames = end_frame - start_frame + 1
+            matrix = fen_to_matrix(fen)
+
+            # Multiply the labels by the number of frames they appear in
+            for val in matrix.flatten():
+                all_labels.extend([val] * num_frames)
+    return Counter(all_labels)
