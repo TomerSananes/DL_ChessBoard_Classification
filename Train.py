@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as T
 import ChessDataset
+import Inference
 from Model import ChessModel
 from tqdm import tqdm
 import PrePostProcessing as ppp
@@ -26,6 +27,7 @@ def get_mean_std (train_dataset):
 
     mean /= total_images
     std /= total_images
+    print(mean, "  ",std)
     return mean, std
 
 
@@ -120,7 +122,7 @@ def train_model():
     # Training Loop
     all_train_loss = []
     all_val_loss = []
-    epochs = 200
+    epochs = 150
     for epoch in range(epochs):
         # Training Phase
         model.train()
@@ -169,7 +171,12 @@ def train_model():
     print(f"\nFINAL TEST ACCURACY: {test_acc / len(test_loader):.4f}")
 
     # Save the trained weights
-    torch.save(model.state_dict(), "chess_model.pth")
+    torch.save(model.state_dict(), "chess_model_final.pth")
+
+    # Save 10 image and their inference from the test dataset
+    directory_path = "predicted_test_results"
+    test_images_path =[test_list[i][0] for i in range(10)]
+    Inference.run_inference(test_images_path ,save_dir=directory_path)
 
 
 if __name__ == "__main__":

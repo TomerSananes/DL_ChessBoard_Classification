@@ -11,3 +11,5 @@ matplotlib
 tqdm
 python-chess
 cairosvg
+svglib
+reportlab

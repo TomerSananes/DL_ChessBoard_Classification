@@ -5,7 +5,7 @@ import numpy as np
 import chess.svg
 import io
 from PIL import Image
-from cairosvg import svg2png
+import cairosvg
 
 
 # map to number
@@ -60,7 +60,7 @@ def matrix_to_fen(matrix):
 def create_fen_image(fen_str):
     board = chess.Board(fen_str)
     svg_data = chess.svg.board(board=board, size=300)
-    png_data = svg2png(bytestring=svg_data)
+    png_data = cairosvg.svg2png(bytestring=svg_data)
     return Image.open(io.BytesIO(png_data))
 
 
@@ -88,3 +88,18 @@ def fast_check_distribution(root_dir):
             for val in matrix.flatten():
                 all_labels.extend([val] * num_frames)
     return Counter(all_labels)
+
+
+def fen_to_image (fen: str):
+    """
+    Render a chess board image from a FEN string.
+    Args:
+        fen (str): FEN representation of the chess board.
+
+    Returns:
+        PIL.Image: Rendered chess board image.
+    """
+    board = chess.Board(fen)
+    svg_data = chess.svg.board(board=board, size=400)
+    png_data = cairosvg.svg2png(bytestring=svg_data.encode("utf-8"))
+    return Image.open(io.BytesIO(png_data))
